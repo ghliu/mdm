@@ -13,9 +13,9 @@ import re
 import json
 import click
 import torch
-import dnnlib
-from torch_utils import distributed as dist
-from training import training_loop
+from edm import dnnlib
+from edm.torch_utils import distributed as dist
+from edm.training import training_loop
 
 import warnings
 warnings.filterwarnings('ignore', 'Grad strides do not match bucket view strides') # False warning printed by PyTorch 1.12.
@@ -76,6 +76,7 @@ def parse_int_list(s):
 @click.option('--transfer',      help='Transfer learning from network pickle', metavar='PKL|URL',   type=str)
 @click.option('--resume',        help='Resume from previous training state', metavar='PT',          type=str)
 @click.option('-n', '--dry-run', help='Print training options and exit',                            is_flag=True)
+@click.option('--pretrain',      help='Pretrain weights', metavar='PT',                             type=str)
 
 def main(**kwargs):
     """Train diffusion-based generative model using the techniques described in the
@@ -94,11 +95,12 @@ def main(**kwargs):
 
     # Initialize config dict.
     c = dnnlib.EasyDict()
-    c.dataset_kwargs = dnnlib.EasyDict(class_name='training.dataset.ImageFolderDataset', path=opts.data, use_labels=opts.cond, xflip=opts.xflip, cache=opts.cache)
+    c.dataset_kwargs = dnnlib.EasyDict(class_name='edm.training.dataset.ImageFolderDataset', path=opts.data, use_labels=opts.cond, xflip=opts.xflip, cache=opts.cache)
     c.data_loader_kwargs = dnnlib.EasyDict(pin_memory=True, num_workers=opts.workers, prefetch_factor=2)
     c.network_kwargs = dnnlib.EasyDict()
     c.loss_kwargs = dnnlib.EasyDict()
     c.optimizer_kwargs = dnnlib.EasyDict(class_name='torch.optim.Adam', lr=opts.lr, betas=[0.9,0.999], eps=1e-8)
+    c.watermark_kwargs = dnnlib.EasyDict(class_name='mdm.watermark.ImageWatermark', dataset_name=opts.data[5: -10])
 
     # Validate dataset options.
     try:
@@ -125,15 +127,15 @@ def main(**kwargs):
 
     # Preconditioning & loss function.
     if opts.precond == 'vp':
-        c.network_kwargs.class_name = 'training.networks.VPPrecond'
-        c.loss_kwargs.class_name = 'training.loss.VPLoss'
+        c.network_kwargs.class_name = 'edm.training.networks.VPPrecond'
+        c.loss_kwargs.class_name = 'edm.training.loss.VPLoss'
     elif opts.precond == 've':
-        c.network_kwargs.class_name = 'training.networks.VEPrecond'
-        c.loss_kwargs.class_name = 'training.loss.VELoss'
+        c.network_kwargs.class_name = 'edm.training.networks.VEPrecond'
+        c.loss_kwargs.class_name = 'edm.training.loss.VELoss'
     else:
         assert opts.precond == 'edm'
-        c.network_kwargs.class_name = 'training.networks.EDMPrecond'
-        c.loss_kwargs.class_name = 'training.loss.EDMLoss'
+        c.network_kwargs.class_name = 'edm.training.networks.EDMPrecond'
+        c.loss_kwargs.class_name = 'edm.training.loss.EDMLoss'
 
     # Network options.
     if opts.cbase is not None:
@@ -141,7 +143,7 @@ def main(**kwargs):
     if opts.cres is not None:
         c.network_kwargs.channel_mult = opts.cres
     if opts.augment:
-        c.augment_kwargs = dnnlib.EasyDict(class_name='training.augment.AugmentPipe', p=opts.augment)
+        c.augment_kwargs = dnnlib.EasyDict(class_name='edm.training.augment.AugmentPipe', p=opts.augment)
         c.augment_kwargs.update(xflip=1e8, yflip=1, scale=1, rotate_frac=1, aniso=1, translate_frac=1)
         c.network_kwargs.augment_dim = 9
     c.network_kwargs.update(dropout=opts.dropout, use_fp16=opts.fp16)
@@ -174,6 +176,8 @@ def main(**kwargs):
         c.resume_pkl = os.path.join(os.path.dirname(opts.resume), f'network-snapshot-{match.group(1)}.pkl')
         c.resume_kimg = int(match.group(1))
         c.resume_state_dump = opts.resume
+    if opts.pretrain:
+        c.pretrain = opts.pretrain
 
     # Description string.
     cond_str = 'cond' if c.dataset_kwargs.use_labels else 'uncond'

@@ -10,7 +10,7 @@
 
 import numpy as np
 import torch
-from torch_utils import persistence
+from edm.torch_utils import persistence
 from torch.nn.functional import silu
 
 #----------------------------------------------------------------------------

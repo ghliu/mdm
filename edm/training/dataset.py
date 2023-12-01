@@ -13,7 +13,7 @@ import zipfile
 import PIL.Image
 import json
 import torch
-import dnnlib
+from edm import dnnlib
 
 try:
     import pyspng

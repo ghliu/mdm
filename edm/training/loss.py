@@ -9,7 +9,7 @@
 "Elucidating the Design Space of Diffusion-Based Generative Models"."""
 
 import torch
-from torch_utils import persistence
+from edm.torch_utils import persistence
 
 #----------------------------------------------------------------------------
 # Loss function corresponding to the variance preserving (VP) formulation

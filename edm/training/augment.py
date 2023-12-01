@@ -12,8 +12,8 @@ Built around the same concepts that were originally proposed in the paper
 
 import numpy as np
 import torch
-from torch_utils import persistence
-from torch_utils import misc
+from edm.torch_utils import persistence
+from edm.torch_utils import misc
 
 #----------------------------------------------------------------------------
 # Coefficients of various wavelet decomposition low-pass filters.

@@ -16,8 +16,8 @@ import pickle
 import numpy as np
 import torch
 import PIL.Image
-import dnnlib
-from torch_utils import distributed as dist
+from edm import dnnlib
+from edm.torch_utils import distributed as dist
 
 #----------------------------------------------------------------------------
 # Proposed EDM sampler (Algorithm 2).
@@ -265,6 +265,12 @@ def main(network_pkl, outdir, subdirs, seeds, class_idx, max_batch_size, device=
     with dnnlib.util.open_url(network_pkl, verbose=(dist.get_rank() == 0)) as f:
         net = pickle.load(f)['ema'].to(device)
 
+    # Construct mirror space mapping
+    with dnnlib.util.open_url(network_pkl, verbose=(dist.get_rank() == 0)) as f:
+        watermark_kwargs = pickle.load(f)['watermark_kwargs']
+        watermark_kwargs.update(device=device)
+    watermark = dnnlib.util.construct_class_by_name(**watermark_kwargs)
+
     # Other ranks follow.
     if dist.get_rank() == 0:
         torch.distributed.barrier()
@@ -292,6 +298,9 @@ def main(network_pkl, outdir, subdirs, seeds, class_idx, max_batch_size, device=
         have_ablation_kwargs = any(x in sampler_kwargs for x in ['solver', 'discretization', 'schedule', 'scaling'])
         sampler_fn = ablation_sampler if have_ablation_kwargs else edm_sampler
         images = sampler_fn(net, latents, class_labels, randn_like=rnd.randn_like, **sampler_kwargs)
+        images = watermark.to_primal(images.float()) # output: [-1,1]
+        if not watermark.is_feasible(images).all():
+            print(f"{batch_seeds=}", watermark.is_feasible(images))
 
         # Save images.
         images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()

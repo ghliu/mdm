@@ -15,10 +15,10 @@ import pickle
 import psutil
 import numpy as np
 import torch
-import dnnlib
-from torch_utils import distributed as dist
-from torch_utils import training_stats
-from torch_utils import misc
+from edm import dnnlib
+from edm.torch_utils import distributed as dist
+from edm.torch_utils import training_stats
+from edm.torch_utils import misc
 
 #----------------------------------------------------------------------------
 
@@ -46,6 +46,8 @@ def training_loop(
     resume_kimg         = 0,        # Start from the given training progress.
     cudnn_benchmark     = True,     # Enable torch.backends.cudnn.benchmark?
     device              = torch.device('cuda'),
+    pretrain            = None,     # (MDM) Pretrain ckpt for initialization
+    watermark_kwargs    = None,     # (MDM) Options for mdm.watermark.ImageWatermark.
 ):
     # Initialize.
     start_time = time.time()
@@ -69,10 +71,19 @@ def training_loop(
     dataset_sampler = misc.InfiniteSampler(dataset=dataset_obj, rank=dist.get_rank(), num_replicas=dist.get_world_size(), seed=seed)
     dataset_iterator = iter(torch.utils.data.DataLoader(dataset=dataset_obj, sampler=dataset_sampler, batch_size=batch_gpu, **data_loader_kwargs))
 
+    # Construct dual space mapping
+    watermark = dnnlib.util.construct_class_by_name(**watermark_kwargs)
+
     # Construct network.
     dist.print0('Constructing network...')
     interface_kwargs = dict(img_resolution=dataset_obj.resolution, img_channels=dataset_obj.num_channels, label_dim=dataset_obj.label_dim)
     net = dnnlib.util.construct_class_by_name(**network_kwargs, **interface_kwargs) # subclass of torch.nn.Module
+
+    if pretrain:
+        dist.print0(f'Loading pratrain weights from {pretrain}...')
+        net.load_state_dict(torch.load(pretrain, map_location="cpu"))
+        net = net.to(device)
+
     net.train().requires_grad_(True).to(device)
     if dist.get_rank() == 0:
         with torch.no_grad():
@@ -126,6 +137,9 @@ def training_loop(
             with misc.ddp_sync(ddp, (round_idx == num_accumulation_rounds - 1)):
                 images, labels = next(dataset_iterator)
                 images = images.to(device).to(torch.float32) / 127.5 - 1
+                # images output: [-1.1]
+                images = watermark.to_dual(images)
+
                 labels = labels.to(device)
                 loss = loss_fn(net=ddp, images=images, labels=labels, augment_pipe=augment_pipe)
                 training_stats.report('Loss/loss', loss)
@@ -176,7 +190,13 @@ def training_loop(
 
         # Save network snapshot.
         if (snapshot_ticks is not None) and (done or cur_tick % snapshot_ticks == 0):
-            data = dict(ema=ema, loss_fn=loss_fn, augment_pipe=augment_pipe, dataset_kwargs=dict(dataset_kwargs))
+            data = dict(
+                ema=ema,
+                loss_fn=loss_fn,
+                augment_pipe=augment_pipe,
+                dataset_kwargs=dict(dataset_kwargs),
+                watermark_kwargs=dict(watermark_kwargs),
+            )
             for key, value in data.items():
                 if isinstance(value, torch.nn.Module):
                     value = copy.deepcopy(value).eval().requires_grad_(False)
