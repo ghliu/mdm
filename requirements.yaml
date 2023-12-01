@@ -1,0 +1,36 @@
+name: mdm
+channels:
+  - anaconda
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - numpy
+  - scipy
+  - termcolor
+  - easydict
+  - ipdb
+  - pytorch==1.12
+  - torchvision==0.13
+  - tqdm
+  - scikit-learn
+  - matplotlib
+  - tensorboard
+  - torchmetrics==0.9.3
+  - imageio
+  - click>=8.0
+  - pillow>=8.3.1
+  - psutil
+  - requests
+  - pip
+  - pip:
+    - colored-traceback
+    - torch-ema
+    - gdown==4.6.0
+    - rich
+    - wandb
+    - geomloss
+    - POT
+    - imageio-ffmpeg>=0.4.3
+    - pyspng
